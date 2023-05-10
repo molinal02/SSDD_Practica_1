@@ -258,9 +258,51 @@ int send_serv(char *destino, char *alias, char *mensaje){
 
     /*-----------  REVISAR ESTO -------------
     
-                    Sin hacer
+                    Faltan cosas
 
       -----------  REVISAR ESTO -------------*/
+
+    // Abrimos el fichero destino
+    FILE* destino_fp;
+
+    if ((destino_fp = fopen(destino_file, "r+")) == NULL){
+        perror("[SERVIDOR][ERROR] El fichero del destinatario no pudo ser abierto\n");
+        respuesta.status = 2;
+        return respuesta;
+    }
+
+    // Leemos el fichero del usuario destino
+    User destino;
+
+    if (fread(&destino, sizeof(User), 1, destino_fp) == 0){
+        perror("[SERVIDOR][ERROR] No se pudo leer el fichero del destinatario\n");
+        fclose(destino_fp);
+        respuesta.status = 2;
+        return respuesta;
+    }
+
+    // Comprobamos si el usuario destino está conectado
+    if (destino.estado == 0) {
+        perror("[SERVIDOR][ERROR] Usuario destino no conectado\n");
+        fclose(destino_fp);
+        respuesta.status = 2;
+        return respuesta;
+            /*-----------  REVISAR ESTO -------------
+    
+                    No se si se menciona lo que tiene que devolver en este caso
+
+            -----------  REVISAR ESTO -------------*/
+    }
+
+    // Enviamos el mensaje a la direccion IP del hilo receptor del destinatario
+    char *IP = destino.IP;
+
+    /*-----------  REVISAR ESTO -------------
+    
+    Mirar si usamos sockets aqui o mandamos la ip a servidor.c para mandarlo.
+
+    -----------  REVISAR ESTO -------------*/
+
 
 }
 
