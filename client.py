@@ -6,6 +6,8 @@ import argparse
 
 import socket
 import threading
+import binascii
+import ipaddress
 
 class client :
 
@@ -24,6 +26,8 @@ class client :
     _username = None
     _alias = None
     _date = None
+    _hilo = None
+    _socket = None
 
     # ******************** METHODS *******************
     @staticmethod
@@ -37,21 +41,31 @@ class client :
         return mensaje
 
     @staticmethod
-    def hiloEscucha(socket,window):
+    def hiloEscucha(window):
+        
+        # Creamos el socket para escuchar al servidor usando la ip del ordenador
+        client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_address = (client._server, 0)
+        client._socket.bind(server_address)
+        client._socket.listen(1)
+
+        # Aceptamos conexiones en un bucle while
         while True:
-            mensaje = client.leerValores(socket)
-            if not mensaje:
-                break
-            else:
-                id = client.leerValores(socket)
-                remitente = client.leerValores(socket)
+            # Esperamos a que se conecte un cliente
+            socket_cliente, direccion = client._socket.accept()
+
+            try:
+                id = client.leerValores(socket_cliente)
+                remitente = client.leerValores(socket_cliente)
                 mensaje = mensaje.decode("utf-8")
                 id = int(id,10)
                 remitente = remitente.decode("utf-8")
-
                 window['_SERVER_'].print("s> MESSAGE {id} FROM {remitente}\n{mensaje}\nEND".format(id=id,remitente=remitente,mensaje=mensaje))
 
-            
+            finally:
+                # Cerramos la conexion con el cliente
+                socket_cliente.close()
+                
     
     # *
     # * @param user - User name to register in the system
@@ -60,7 +74,7 @@ class client :
     # * @return USER_ERROR if the user is already registered
     # * @return ERROR if another error occurred
     @staticmethod
-    def  register(user, window):
+    def register(user, window):
 
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -88,8 +102,9 @@ class client :
             sock_client.sendall(mensaje)
 
         #  6. Recibir respuesta del servidor (0 si bien, 1 si ya registrado, 2 si error)
-            resultado = client.leerValores(sock_client)
-            resultado = int(resultado,10)
+            resultado = sock_client.recv(1)
+            print("Resultado: {}".format(resultado))
+            resultado = resultado.decode("utf-8")
 
         #  7. Cerrar conexion
         finally:
@@ -129,8 +144,8 @@ class client :
             sock_client.sendall(mensaje)
 
         #  4. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si error)
-            resultado = client.leerValores(sock_client)
-            resultado = int(resultado,10)
+            resultado = sock_client.recv(1)
+            resultado = resultado.decode("utf-8")
 
         #  5. Cerrar conexion
         finally:
@@ -161,30 +176,31 @@ class client :
         server_address = (client._server, client._port)
         sock_client.connect(server_address)
 
-        # Creamos hilo de escucha
-        hilo = threading.Thread(target=client.hiloEscucha, args=(sock_client,window,))
-        hilo.start()
+        #  2. Creamos hilo de escucha
+        client._hilo = threading.Thread(target=client.hiloEscucha, args=(window,))
+        client._hilo.start()
 
-        #  2. Enviar la cadena CONNECT
+        #  3. Enviar la cadena CONNECT
         try:
             mensaje = b'CONNECT\0'
             sock_client.sendall(mensaje)
         
-        #  3. Enviar cadena con nombre de usuario (alias)
+        #  4. Enviar cadena con nombre de usuario (alias)
             usuario = user + "\0"
             mensaje = usuario.encode("utf-8")
             sock_client.sendall(mensaje)
         
-        #  4. Se envía una cadena con el número de puerto de escucha
-            puerto = str(client._port) + "\0"
+        #  5. Se envía una cadena con el número de puerto de escucha
+            port = client._socket.getsockname()[1]
+            puerto = str(port) + "\0"
             mensaje = puerto.encode("utf-8")
             sock_client.sendall(mensaje)
 
-        #  5. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si ya está conectado, 3 si error)
-            resultado = client.leerValores(sock_client)
-            resultado = int(resultado,10)
+        #  6. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si ya está conectado, 3 si error)
+            resultado = sock_client.recv(1)
+            resultado = resultado.decode("utf-8")
         
-        #  6. Cerrar conexion
+        #  7. Cerrar conexion
         finally:
             sock_client.close()
 
@@ -192,21 +208,28 @@ class client :
             window['_SERVER_'].print("s> CONNECT OK")
             return client.RC.OK
         elif resultado == "1":
+            try:
+                if (client._socket != None):
+                    client._socket.close()
+                    client._socket = None
+                client._hilo.terminate()
+            except:
+                pass
             window['_SERVER_'].print("s> CONNECT FAIL, USER DOES NOT EXIST")
             return client.RC.USER_ERROR
         elif resultado == "2":
+            try:
+                if (client._socket != None):
+                    client._socket.close()
+                    client._socket = None
+                client._hilo.terminate()
+            except:
+                pass
             window['_SERVER_'].print("s> USER ALREADY CONNECTED")
             return client.RC.USER_ERROR
 
         window['_SERVER_'].print("s> CONNECT FAIL")
         return client.RC.ERROR
-    
-        # -----------  REVISAR ESTO -------------
-        
-        # REVISAR HILO
-
-        # -----------  REVISAR ESTO -------------
-
 
     # *
     # * @param user - User name to disconnect from the system
@@ -233,14 +256,21 @@ class client :
             sock_client.sendall(mensaje)
 
         #  4. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si no conectado, 3 si error)
-            resultado = client.leerValores(sock_client)
-            resultado = int(resultado,10)
+            resultado = sock_client.recv(1)
+            resultado = resultado.decode("utf-8")
 
         #  5. Cerrar conexion
         finally:
             sock_client.close()
 
         if resultado == "0":
+            try:
+                if (client._socket != None):
+                    client._socket.close()
+                    client._socket = None
+                client._hilo.terminate()
+            except:
+                pass
             window['_SERVER_'].print("s> DISCONNECT OK")
             return client.RC.OK
         elif resultado == "1":
@@ -345,17 +375,22 @@ class client :
         try:
             mensaje = b'CONNECTEDUSERS\0'
             sock_client.sendall(mensaje)
+        
+        #  3. Enviar cadena con nombre de usuario (alias)
+            usuario = client._alias + "\0"
+            mensaje = usuario.encode("utf-8")
+            sock_client.sendall(mensaje)
 
-        #  3. Recibir respuesta del servidor (0 si bien, 1 si usuario no conectado, 2 si error)
+        #  4. Recibir respuesta del servidor (0 si bien, 1 si usuario no conectado, 2 si error)
             resultado = client.leerValores(sock_client)
             resultado = int(resultado,10)
         
-        #  4. Recibir cadena con el número de usuarios conectados si resultado es 0
+        #  5. Recibir cadena con el número de usuarios conectados si resultado es 0
             if resultado == 0:
                 usuarios = client.leerValores(sock_client)
                 usuarios = int(usuarios,10)
         
-        #  5. Recibir cadenas como usuarios conectados
+        #  6. Recibir cadenas como usuarios conectados
                 conectados = ""
                 for i in range(usuarios):
                     usuario = client.leerValores(sock_client)

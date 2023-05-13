@@ -20,7 +20,7 @@ typedef struct info{
 
 // Estructura para información recibida
 typedef struct response{
-    int status;
+    char* status;
     unsigned int id;
     int num_users;
     char users;
@@ -35,9 +35,16 @@ typedef struct request{
 
 // Estructura para respuesta del servidor a cliente
 typedef struct service{
-    int status;
+    char* status;
     Response content;
 } Service;
+
+// Estructura para el envío de mensajes
+typedef struct message{
+	unsigned int id_emisor;
+	char* alias_emisor[32];
+	char mensaje[256];
+} Message;
 
 // Recepcion de mensajes por socket [TOMADO DE EJEMPLO DE CLASE]
 int recvMessage(int socket, char *buffer, int len){
