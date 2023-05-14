@@ -22,8 +22,11 @@ typedef struct info{
 typedef struct response{
     char* status;
     unsigned int id;
+	char port_escucha[6];
+    char IP[INET_ADDRSTRLEN];
+	char pend_mensajes[256];
     int num_users;
-    char users;
+    char users[2048];
 } Response;
 
 // Estructura para peticiones de cliente
@@ -41,8 +44,8 @@ typedef struct service{
 
 // Estructura para el envío de mensajes
 typedef struct message{
-	unsigned int id_emisor;
-	char* alias_emisor[32];
+	char id_emisor[32];
+	char alias_emisor[32];
 	char mensaje[256];
 } Message;
 

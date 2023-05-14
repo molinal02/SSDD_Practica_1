@@ -52,18 +52,16 @@ class client :
         # Aceptamos conexiones en un bucle while
         while True:
             # Esperamos a que se conecte un cliente
-            socket_cliente, direccion = client._socket.accept()
+            socket_cliente = client._socket.accept()
 
             try:
                 id = client.leerValores(socket_cliente)
                 remitente = client.leerValores(socket_cliente)
-                mensaje = mensaje.decode("utf-8")
+                mensaje = client.leerValores(socket_cliente)
                 id = int(id,10)
-                remitente = remitente.decode("utf-8")
                 window['_SERVER_'].print("s> MESSAGE {id} FROM {remitente}\n{mensaje}\nEND".format(id=id,remitente=remitente,mensaje=mensaje))
-
+            
             finally:
-                # Cerramos la conexion con el cliente
                 socket_cliente.close()
                 
     
@@ -103,7 +101,6 @@ class client :
 
         #  6. Recibir respuesta del servidor (0 si bien, 1 si ya registrado, 2 si error)
             resultado = sock_client.recv(1)
-            print("Resultado: {}".format(resultado))
             resultado = resultado.decode("utf-8")
 
         #  7. Cerrar conexion
@@ -191,7 +188,9 @@ class client :
             sock_client.sendall(mensaje)
         
         #  5. Se envía una cadena con el número de puerto de escucha
-            port = client._socket.getsockname()[1]
+            _, port = sock_client.getsockname()
+
+            _, port = client._socket.getsockname()
             puerto = str(port) + "\0"
             mensaje = puerto.encode("utf-8")
             sock_client.sendall(mensaje)
@@ -319,20 +318,19 @@ class client :
             mensaje = mensaje.encode("utf-8")
             sock_client.sendall(mensaje)
 
-        #  6. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si error)
-            resultado = client.leerValores(sock_client)
-            resultado = int(resultado,10)
-            # Si resultado es 0 se recibe un identificador
-            if resultado == 0:
-                id = client.leerValores(sock_client)
-                id = int(id,10)
+        #  6. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si error) y el id
+            resultado = sock_client.recv(1)
+            resultado = resultado.decode("utf-8")
+
+            id_emisor = client.leerValores(sock_client)
+            print("El tipo de id es: {}".format(type(id_emisor)))
 
         #  7. Cerrar conexion
         finally:
             sock_client.close()
         
         if resultado == "0":
-            window['_SERVER_'].print("s> SEND OK - MESSAGE " + str(id))
+            window['_SERVER_'].print("s> SEND OK - MESSAGE {id}".format(id=id_emisor))
             return client.RC.OK
         elif resultado == "1":
             window['_SERVER_'].print("s> SEND FAIL / USER DOES NOT EXIST")
@@ -364,7 +362,7 @@ class client :
         return client.RC.ERROR
 
     @staticmethod
-    def  connectedUsers(window):
+    def connectedUsers(window):
         
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -382,17 +380,18 @@ class client :
             sock_client.sendall(mensaje)
 
         #  4. Recibir respuesta del servidor (0 si bien, 1 si usuario no conectado, 2 si error)
-            resultado = client.leerValores(sock_client)
-            resultado = int(resultado,10)
+            resultado = sock_client.recv(1)
+            resultado = resultado.decode("utf-8")
         
         #  5. Recibir cadena con el número de usuarios conectados si resultado es 0
-            if resultado == 0:
-                usuarios = client.leerValores(sock_client)
-                usuarios = int(usuarios,10)
+            if resultado == "0":
+                num_usuarios = client.leerValores(sock_client)
+                print("Numero de usuarios: {}".format(num_usuarios))
+                num_usuarios = int(num_usuarios, 10)
         
         #  6. Recibir cadenas como usuarios conectados
                 conectados = ""
-                for i in range(usuarios):
+                for i in range(num_usuarios):
                     usuario = client.leerValores(sock_client)
                     if i == 0:
                         conectados = usuario

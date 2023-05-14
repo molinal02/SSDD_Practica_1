@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
+#include <limits.h>
 
 const char* filename_register_prefix= "data_";     // Prefijo en ruta para fichero de datos de registo de usuario N
 const char* filename_msg_prefix = "msg_";          // Prefijo en ruta para fichero de mensajes pendientes para usuario N
@@ -24,14 +25,6 @@ typedef struct info{
     char mensaje[256];
 } Info;
 
-// Estructura para devolver información
-typedef struct service{
-    char* status;
-    unsigned int id;
-    int num_users;
-    char users;
-} Service;
-
 // Estructura para almacenar datos del usuario
 typedef struct user{
     char usuario[64];
@@ -43,6 +36,17 @@ typedef struct user{
     char pend_mensajes[256];
     unsigned int id_msg;
 } User;
+
+// Estructura para información recibida
+typedef struct response{
+    char* status;
+    unsigned int id;
+    char port_escucha[6];
+    char IP[INET_ADDRSTRLEN];
+    char pend_mensajes[256];
+    int num_users;
+    char users[2048];
+} Response;
 
 // Registra a un usuario
 char* register_serv(char *username, char *alias, char *date){
@@ -56,6 +60,7 @@ char* register_serv(char *username, char *alias, char *date){
     // Comprobamos si existe
     if ((user_dir = opendir(user_dirname)) != NULL){
         perror("[SERVIDOR][ERROR] El directorio del usuario ya existe\n");
+        closedir(user_dir);
         return "1";
     }
     
@@ -127,6 +132,8 @@ char* unregister_serv(char *alias){
         return "1";
     }
 
+    closedir(user_dir);
+
     // Elimina los ficheros con extesion .dat
     while ((user_entry = readdir(user_dir)) != NULL) {
             if (strstr(user_entry->d_name, ".dat") != NULL){
@@ -159,6 +166,8 @@ char* connect_serv(char *alias, char *IP, char *port_escucha){
         return "1";
     }
 
+    closedir(user_dir);
+
     // Creamos el nombre del fichero de datos personales de usuario
     char user_file [2048];
     sprintf(user_file, "%s/%s%s%s", user_dirname, filename_register_prefix, alias, ext);
@@ -185,13 +194,6 @@ char* connect_serv(char *alias, char *IP, char *port_escucha){
         return "3";
     }
 
-    printf("Usuario: %s\n", user.usuario);
-    printf("Alias: %s\n", user.alias);
-    printf("Estado: %d\n", user.estado);
-    printf("IP: %s\n", user.IP);
-    printf("Port: %s\n", user.port_escucha);
-
-
     if (user.estado == 1) {
         perror("[SERVIDOR][ERROR] Usuario ya conectado\n");
         fclose(user_fp);
@@ -215,12 +217,6 @@ char* connect_serv(char *alias, char *IP, char *port_escucha){
     fclose(user_fp);
 
     return "0";
-
-    /*-----------  REVISAR ESTO -------------
-    
-    Falta ver como enviar los mensajes pendientes al conectarse
-
-      -----------  REVISAR ESTO -------------*/
 }
 
 // Desconecta a un usuario
@@ -237,6 +233,8 @@ char* disconnect_serv(char *alias){
         perror("[SERVIDOR][ERROR] El directorio del usuario no existe\n");
         return "1";
     }
+
+    closedir(user_dir);
 
     // Creamos el nombre del fichero de datos personales de usuario
     char user_file [2048];
@@ -288,9 +286,9 @@ char* disconnect_serv(char *alias){
 }
 
 // Procesa pedición de envío de mensaje a un usuario
-int send_serv(char *alias, char *destino, char *mensaje){
+Response send_serv(char *alias, char *destino, char *mensaje){
 
-    Service service;
+    Response service;
 
     DIR* user_dir;
 
@@ -304,6 +302,8 @@ int send_serv(char *alias, char *destino, char *mensaje){
         service.status = "2";
         return service;
     }
+
+    closedir(user_dir);
 
     // Creamos el nombre del fichero de datos personales del emisor
     char user_file [2048];
@@ -354,6 +354,8 @@ int send_serv(char *alias, char *destino, char *mensaje){
         return service;
     }
 
+    closedir(dest_dir);
+
     // Creamos el nombre del fichero de datos personales del destinatario
     char dest_file [2048];
     sprintf(dest_file, "%s/%s%s%s", dest_dirname, filename_register_prefix, destino, ext);
@@ -383,105 +385,155 @@ int send_serv(char *alias, char *destino, char *mensaje){
         return service;
     }
 
-    if (dest.estado == 0) {
+    // Actualizamos el id del emisor
+    user.id_msg %= UINT_MAX;
+    user.id_msg++;
+
+    rewind(user_fp);
+
+    if (fwrite(&user, sizeof(User), 1, user_fp) == 0){
+        perror("[SERVIDOR][ERROR] No se pudo escribir en el fichero\n");
         fclose(user_fp);
         fclose(dest_fp);
-        service.status = "0";
-        service.id = user.id_msg;
-        return service;
-    } else {
-        fclose(user_fp);
-        fclose(dest_fp);
-        service.status = "3";
-        service.id = user.id_msg;
+        service.status = "2";
         return service;
     }
+
+    fclose(user_fp);
+    fclose(dest_fp);
+
+    service.id = user.id_msg;
+    strcpy(service.port_escucha, dest.port_escucha);
+    strcpy(service.IP, dest.IP);
+
+    if (dest.estado == 1) {
+        service.status = "0";
+    } else {
+        service.status = "3";
+        strcpy(service.pend_mensajes, dest.pend_mensajes);
+    }
+
+    return service;
 
 }
-/*
+
 // Devuelve usuarios conectados
-int connected_users_serv(char *alias){
+Response connected_users_serv(char *alias){
 
-    Service respuesta;
-    char conectados [4048];
-    // Obtiene nombre completo del fichero
-    char user_file [1024];
-    sprintf(user_file, "%s%d%s", filename, alias, ext);
+    char conectados[1024] = "";
+    int num_conectados = 0;
 
-    if (access(user_file, F_OK)){
-        perror("[SERVIDOR][ERROR] Usuario no existe\n");
-        respuesta.status = 2;
-        return respuesta;
+    Response service;
+
+    DIR* user_dir;
+    struct dirent* user_dirent;
+
+    // Creamos el nombre del directorio del emisor
+    char user_dirname [1024];
+    sprintf(user_dirname, "./%s/", dirname);
+
+    // Comprobamos si existe el emisor
+    if ((user_dir = opendir(user_dirname)) == NULL){
+        perror("[SERVIDOR][ERROR] El directorio del emisor no existe\n");
+        service.status = "2";
+        return service;
     }
 
-    // Abrimos el fichero
+    // Creamos el nombre del fichero de datos personales del emisor
+    char user_file [2048];
+    sprintf(user_file, "%s/%s%s/%s%s%s", user_dirname, register_prefix, alias, filename_register_prefix, alias, ext);
+
+    if (access(user_file, F_OK)){
+        perror("[SERVIDOR][ERROR] Registro de usuario no existe\n");
+        service.status = "2";
+        return service;
+    }
+
+    // Abrimos el fichero registro del emisor
     FILE* user_fp;
 
     if ((user_fp = fopen(user_file, "r+")) == NULL){
-        perror("[SERVIDOR][ERROR] El fichero del usuario no pudo ser abierto\n");
-        respuesta.status = 2;
-        return respuesta;
+        perror("[SERVIDOR][ERROR] El fichero del usuario para registro no pudo ser abierto\n");
+        service.status = "2";
+        return service;
     }
 
-    // Leemos el fichero
+    // Leemos el fichero emisor
     User user;
 
     if (fread(&user, sizeof(User), 1, user_fp) == 0){
-        perror("[SERVIDOR][ERROR] No se pudo leer el fichero\n");
+        perror("[SERVIDOR][ERROR] No se pudo leer el fichero del usuario\n");
         fclose(user_fp);
-        respuesta.status = 2;
-        return respuesta;
+        service.status = "2";
+        return service;
     }
 
     if (user.estado == 0) {
-        perror("[SERVIDOR][ERROR] Usuario no conectado\n");
+        perror("[SERVIDOR][ERROR] Usuario no está conectado\n");
         fclose(user_fp);
-        respuesta.status = 1;
-        return respuesta;
+        service.status = "1";
+        return service;
     }
 
-    // Leemos todos los ficheros del directorio
-    DIR *users_dir;
-    struct dirent *user_entry;
+    fclose(user_fp);
 
-    if ((users_dir = opendir(dirname)) == NULL) {
-        perror("[SERVIDOR][ERROR] No se pudo abrir el directorio\n");
-        respuesta.status = 2;
-        return respuesta;
-    }
+    int primero = 0;
+    while ((user_dirent = readdir(user_dir)) != NULL) { // Leer cada archivo en el directorio
+        if (user_dirent->d_type == DT_DIR) { // Si es un directorio
+            if (strcmp(user_dirent->d_name, ".") != 0 && strcmp(user_dirent->d_name, "..") != 0) { // Ignorar "." y ".."
+                
+                char subdir_path[2048];
+                sprintf(subdir_path, "%s%s/", user_dirname, user_dirent->d_name); // Ruta al subdirectorio
+                DIR *subdir = opendir(subdir_path); // Abrir subdirectorio
 
-    bool primero = true;
-    while ((user_entry = readdir(d)) != NULL) {
-        if (strstr(user_entry->d_name, ".dat") != NULL){
+                if (subdir != NULL) {
+                    struct dirent *subent;
+                    while ((subent = readdir(subdir)) != NULL) { // Leer cada archivo en el subdirectorio
+                        
+                        if (strncmp(subent->d_name, "data_", 5) == 0) { // Si el archivo empieza por "data_"
+                            char filepath[4096];
+                            sprintf(filepath, "%s%s", subdir_path, subent->d_name); // Ruta al archivo
 
-            if ((user_fp = fopen(user_entry->d_name, "r+")) == NULL){
-                perror("[SERVIDOR][ERROR] El fichero del usuario no pudo ser abierto\n");
-                respuesta.status = 2;
-                return respuesta;
-            }
+                            FILE* actual_fp;
+                            if ((actual_fp = fopen(filepath, "r+")) == NULL){
+                                perror("[SERVIDOR][ERROR] El fichero actual no pudo ser abierto\n");
+                                service.status = "2";
+                                return service;
+                            }
 
-            if (fread(&user, sizeof(User), 1, user_fp) == 0){
-                perror("[SERVIDOR][ERROR] No se pudo leer el fichero\n");
-                fclose(user_fp);
-                respuesta.status = 2;
-                return respuesta;
-            }
+                            User actual;
+                            if (fread(&actual, sizeof(User), 1, actual_fp) == 0){
+                                perror("[SERVIDOR][ERROR] No se pudo leer el fichero actual\n");
+                                fclose(actual_fp);
+                                service.status = "2";
+                                return service;
+                            }
 
-            if (user.estado == 1) {
-                char *persona = strtok(user_entry->d_name, ext);
-                if (primero) {
-                    sprintf(conectados, "%s", persona);
-                    primero = false;
-                } else {
-                    sprintf(conectados, "%s,%s", conectados, persona);
+                            if (actual.estado == 1){
+                                // char *persona = strtok(subent->d_name, ext);
+                                if (primero == 0) {
+                                    strcat(conectados, actual.alias);
+                                    primero = 1;
+                                } else {
+                                    strcat(conectados, ",");
+                                    strcat(conectados, actual.alias);
+                                }
+                                num_conectados++;
+                            }
+                            fclose(actual_fp);
+                        }
+                    }
+                    closedir(subdir); // Cerrar subdirectorio
                 }
             }
         }
     }
-    closedir(d);
 
-    respuesta.status = 0;
-    strcpy(respuesta.users, conectados);
+    closedir(user_dir);
 
-    return respuesta;
-}*/
+    service.status = "0";
+    strcpy(service.users, conectados);
+    service.num_users = num_conectados;
+
+    return service;
+}

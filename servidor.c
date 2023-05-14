@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <ifaddrs.h>
-#include <limits.h>
 
 #include "comunicacion.h"
 
@@ -17,13 +16,15 @@ pthread_mutex_t users_mutex = PTHREAD_MUTEX_INITIALIZER;   // Mutex para ejecuci
 pthread_mutex_t mutex_msg = PTHREAD_MUTEX_INITIALIZER;      // Mutex para control de paso de mensajes
 pthread_cond_t condvar_msg = PTHREAD_COND_INITIALIZER;      // Var. condicion asociada al mutex de paso de mensajes
 
+
+
 // Prototipos de la API del lado servidor
 char* register_serv(char *user, char *alias, char *date);
 char* unregister_serv(char *alias);
 char* connect_serv(char *alias, char *IP, char *port_escucha);
 char* disconnect_serv(char *alias);
-char* send_serv(char *alias, char *destino, char *mensaje);
-int connected_users_serv(char *alias);
+Response send_serv(char *alias, char *destino, char *mensaje);
+Response connected_users_serv(char *alias);
 
 
 void tratar_pet (void* pet){
@@ -84,15 +85,66 @@ void tratar_pet (void* pet){
                 perror("[SERVIDOR][ERROR] El fichero de mensajes del usuario no pudo ser abierto\n");
             }
 
-            char mensaje[256];
-            while (fgets(mensaje, sizeof(mensaje), user_fp) != NULL) {
-                // Enviamos el mensaje
-                if (sendMessage(peticion.sock_client, mensaje, strlen(mensaje)+1) == -1)
-                    perror("[SERVIDOR][ERROR] No se pudo enviar el mensaje al cliente\n");
+            Message mensaje;
+            while (fread(&mensaje, sizeof(Message), 1, user_fp)) {
+
+                // Información del servidor y cliente
+                int sock_client_fd;
+                struct sockaddr_in serv_addr;
+                unsigned short puerto = (unsigned short) atoi(peticion.content.port_escucha);
+
+                // Inicializamos a 0
+                bzero((char *)&serv_addr, sizeof(serv_addr));
+
+                // Dirección y puerto del socket de escucha del cliente
+                serv_addr.sin_family = AF_INET;
+                serv_addr.sin_addr.s_addr = inet_addr(peticion.content.IP);
+                serv_addr.sin_port = htons(puerto);
+                // Creación socket para comunicaciones con el cliente
+                if ((sock_client_fd = socket(AF_INET, SOCK_STREAM, 0))==-1) {
+                    perror("[SERVIDOR][ERROR] No se pudo crear socket de comunicaciones con el cliente\n");
+                }
+
+                // Conectamos con el socket de escucha del cliente
+                if (connect(sock_client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
+                    perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del cliente\n");
+                    if(close(sock_client_fd) == -1) {
+                        perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones con el cliente\n");
+                    }
+                }
+
+                if (sendMessage(sock_client_fd, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1){
+                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
+                    strcpy(respuesta.content.status, "2");
+                }
+
+                if (sendMessage(sock_client_fd, mensaje.alias_emisor, strlen(mensaje.alias_emisor)+1) == -1) {
+                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (emisor)\n");
+                    strcpy(respuesta.content.status, "2");
+                }
+
+                if (sendMessage(sock_client_fd, mensaje.mensaje, strlen(mensaje.mensaje)+1) == -1){
+                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (mensaje)\n");
+                    strcpy(respuesta.content.status, "2");
+                }
+
+                // Cerramos el socket
+                if(close(sock_client_fd) == -1) {
+                    perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
+                    strcpy(respuesta.content.status, "2");
+                }
             }
 
             // Cerramos el archivo
             fclose(user_fp);
+
+            // Abrimos el archivo para borrar su contenido
+            FILE* user_fp2;
+            if ((user_fp2 = fopen(ruta_fichero, "wb")) == NULL){
+                perror("[SERVIDOR][ERROR] El fichero de mensajes del usuario no pudo ser abierto tras la lectura de mensajes\n");
+                strcpy(respuesta.content.status, "2");
+            }
+            fclose(user_fp2);
         }
 
         pthread_mutex_unlock(&users_mutex);        
@@ -113,70 +165,141 @@ void tratar_pet (void* pet){
         // Obtiene acceso exclusivo al directorio "users" y sus ficheros
         pthread_mutex_lock(&users_mutex);
         respuesta.content = send_serv(peticion.content.alias, peticion.content.destinatario, peticion.content.mensaje); 
-        
-        if (strcmp(respuesta.content.status, "1") || strcmp(respuesta.content.status, "2")){
+
+        if ((strcmp(respuesta.content.status, "1") == 0) || (strcmp(respuesta.content.status, "2") == 0)){
             // Se envia la respuesta de status al cliente
             if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
-        }
 
-        if (strcmp(respuesta.content.status, "0")){
+        } else if (strcmp(respuesta.content.status, "0") == 0){
+            // Información del servidor y cliente
+            int sock_client_fd;
+            struct sockaddr_in serv_addr;
+            unsigned short puerto = (unsigned short) atoi(respuesta.content.port_escucha);
+
+            // Inicializamos a 0
+            bzero((char *)&serv_addr, sizeof(serv_addr));
+
+            // Dirección y puerto del socket de escucha del cliente
+            serv_addr.sin_family = AF_INET;
+            serv_addr.sin_addr.s_addr = inet_addr(respuesta.content.IP);
+            serv_addr.sin_port = htons(puerto);
+
+            // Creación socket para comunicaciones con el cliente
+            if ((sock_client_fd = socket(AF_INET, SOCK_STREAM, 0))==-1) {
+                perror("[SERVIDOR][ERROR] No se pudo crear socket de comunicaciones con el cliente\n");
+            }
+
+            // Conectamos con el socket de escucha del cliente
+            if (connect(sock_client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
+                perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del cliente\n");
+                if(close(sock_client_fd) == -1) {
+                    perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones con el cliente\n");
+                }
+            }
+
+            char id_emisor2[32];
+            sprintf(id_emisor2, "%u", respuesta.content.id);
             Message mensaje;
-            mensaje.id += respuesta.content.id;
-            mensaje.id %= UINT_MAX;
-            mensaje.alias_emisor = peticion.content.alias;
-            mensaje.mensaje = peticion.content.mensaje;
+            sprintf(mensaje.id_emisor, "%u", respuesta.content.id);
+            sprintf(mensaje.alias_emisor, "%s", peticion.content.alias);
+            sprintf(mensaje.mensaje, "%s", peticion.content.mensaje);
 
             // Enviamos el mensaje al destinatario
-            
-        }
+            if (sendMessage(sock_client_fd, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1){
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
+                strcpy(respuesta.content.status, "2");
+            }
+            if (sendMessage(sock_client_fd, mensaje.alias_emisor, strlen(mensaje.alias_emisor)+1) == -1) {
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (emisor)\n");
+                strcpy(respuesta.content.status, "2");
+            }
+            if (sendMessage(sock_client_fd, mensaje.mensaje, strlen(mensaje.mensaje)+1) == -1){
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (mensaje)\n");
+                strcpy(respuesta.content.status, "2");
+            }
 
+            // Cerramos el socket
+            if(close(sock_client_fd) == -1) {
+                perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
+                strcpy(respuesta.content.status, "2");
+            }
+
+            if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
+
+            if (sendMessage(peticion.sock_client, id_emisor2, strlen(id_emisor2)+1) == -1)
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
+
+            printf("s> MESSAGE <%s> FROM <%s> TO <%s>\n", mensaje.id_emisor, mensaje.alias_emisor, peticion.content.destinatario);
+
+        } else if ((strcmp(respuesta.content.status, "3")) == 0){
+            
+            Message mensaje;
+            sprintf(mensaje.id_emisor, "%u", respuesta.content.id);
+            sprintf(mensaje.alias_emisor, "%s", peticion.content.alias);
+            sprintf(mensaje.mensaje, "%s", peticion.content.mensaje);
+
+            // Escribimos el mensaje en el fichero de mensajes del destinatario
+            FILE* fichero_mensajes;
+            if ((fichero_mensajes = fopen(respuesta.content.pend_mensajes, "ab")) == NULL) {
+                perror("[SERVIDOR][ERROR] No se pudo abrir el fichero de mensajes del destinatario\n");
+                respuesta.content.status = "2";
+            }
+            if (fwrite(&mensaje, sizeof(Message), 1, fichero_mensajes) == 0) {
+                perror("[SERVIDOR][ERROR] No se pudo escribir el mensaje en el fichero de mensajes del destinatario\n");
+                respuesta.content.status = "2";
+            }
+
+            fclose(fichero_mensajes);
+
+            respuesta.content.status = "0";
+
+            if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
+
+            if (sendMessage(peticion.sock_client, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1)
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
+
+            printf("s> MESSAGE <%s> FROM <%s> TO <%s> STORED\n", mensaje.id_emisor, mensaje.alias_emisor, peticion.content.destinatario);
+
+        }
         pthread_mutex_unlock(&users_mutex);
 
-        // Se envia la respuesta de status al cliente
-        if (sendMessage(peticion.sock_client, (char*) &respuesta.content.status, sizeof(int32_t)) == -1)
-            perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
-        
-        
-        // Se comprueba si ha salido bien
-        if (status == 0) {
-            // Se envia la respuesta de id al cliente
-            if (sendMessage(peticion.sock_client, (char*) &respuesta.content.id, sizeof(unsigned int)) == -1)
-                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id)\n");
-        }
-
-    } /*else if (strcmp(peticion.op, "CONNECTEDUSERS") == 0){
+    } else if (strcmp(peticion.op, "CONNECTEDUSERS") == 0){
 
         // Obtiene acceso exclusivo al directorio "users" y sus ficheros
         pthread_mutex_lock(&users_mutex);
-        respuesta.status = connected_users_serv(peticion.content.alias);
-        pthread_mutex_unlock(&users_mutex);
-        int status = respuesta.content.status;
-        respuesta.content.status = ntohl(respuesta.content.status);
+        respuesta.content = connected_users_serv(peticion.content.alias);
 
         // Se envia la respuesta de status al cliente
-        if (sendMessage(peticion.sock_client, (char*) &respuesta.content.status, sizeof(int32_t)) == -1)
+        if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
             perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
         
-        
-        // Se comprueba si ha salido bien
-        if (status == 0) {
-
-            // Se convierte el número a cadena
-            char num_users[50]; // Se da por hecho que no habrá más de estos usuarios
+        if (strcmp(respuesta.content.status, "0") == 0) {
+            // Pasamos a string el número de usuarios conectados
+            char num_users[32];
             sprintf(num_users, "%d", respuesta.content.num_users);
 
+            printf("Número de usuarios conectados: %d\n", respuesta.content.num_users);
+            printf("Usuarios conectados: %s\n", respuesta.content.users);
             // Se envia el número de usuarios conectados
-            if (sendMessage(peticion.sock_client, (char*) num_users, sizeof(num_users)) == -1)
+            if (sendMessage(peticion.sock_client, num_users, strlen(num_users)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (número de usuarios)\n");
-            
-            // Se envían los usuarios conectados
-            if (sendMessage(peticion.sock_client, (char*) &respuesta.content.users, sizeof(respuesta.content.users)) == -1)
-                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (número de usuarios)\n");
-            
-        }
 
-    } */else {
+            // Guardamos los usuarios conectados en un string
+            char *persona = strtok(respuesta.content.users, ",");
+            while (persona != NULL) {
+                // Se envían los usuarios conectados
+                printf("Usuario mandado: %s\n", persona);
+                if (sendMessage(peticion.sock_client, persona, strlen(persona)+1) == -1)
+                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (usuarios)\n");
+                persona = strtok(NULL, ",");
+            }
+        }
+        pthread_mutex_unlock(&users_mutex);
+
+    } else {
         perror("[SERVIDOR][ERROR] Operación no válida\n");
     }
     // Se cierra el socket del cliente
@@ -261,7 +384,7 @@ int main(int argc, char* argv[]){
     }
 
     // Se muestra mensaje de inicio
-    printf("init server <%s>:%d\n", host, puerto);
+    printf("init server %s:%d\n", host, puerto);
     printf("s>\n");
 
     freeifaddrs(ifaddr);
