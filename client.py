@@ -8,6 +8,7 @@ import socket
 import threading
 import binascii
 import ipaddress
+import zeep
 
 class client :
 
@@ -28,6 +29,7 @@ class client :
     _date = None
     _hilo = None
     _socket = None
+    _soap = zeep.Client(wsdl="http://localhost:8000/?wsdl")
 
     # ******************** METHODS *******************
     @staticmethod
@@ -52,14 +54,23 @@ class client :
         # Aceptamos conexiones en un bucle while
         while True:
             # Esperamos a que se conecte un cliente
-            socket_cliente = client._socket.accept()
-
+            socket_cliente, direccion = client._socket.accept()
+            print("Conectado")
             try:
-                id = client.leerValores(socket_cliente)
-                remitente = client.leerValores(socket_cliente)
-                mensaje = client.leerValores(socket_cliente)
-                id = int(id,10)
-                window['_SERVER_'].print("s> MESSAGE {id} FROM {remitente}\n{mensaje}\nEND".format(id=id,remitente=remitente,mensaje=mensaje))
+                #Recibimos un mensaje con la operacion
+                operacion = client.leerValores(socket_cliente)
+                if operacion == "RECEIVE_MESS":
+                    id = client.leerValores(socket_cliente)
+                    remitente = client.leerValores(socket_cliente)
+                    mensaje = client.leerValores(socket_cliente)
+                    id = int(id,10)
+                    window['_SERVER_'].print("s> MESSAGE {id} FROM {remitente}\n{mensaje}\nEND".format(id=id,remitente=remitente,mensaje=mensaje))
+                elif operacion == "SEND_MESS_ACK":
+                    id = client.leerValores(socket_cliente)
+                    window['_SERVER_'].print("s> SEND MESSAGE {} OK".format(id))
+                else:
+                    print("La operación es: " + operacion)
+                    window['_SERVER_'].print("s> ERROR RECEIVING MESSAGE")
             
             finally:
                 socket_cliente.close()
@@ -100,8 +111,7 @@ class client :
             sock_client.sendall(mensaje)
 
         #  6. Recibir respuesta del servidor (0 si bien, 1 si ya registrado, 2 si error)
-            resultado = sock_client.recv(1)
-            resultado = resultado.decode("utf-8")
+            resultado = client.leerValores(sock_client)
 
         #  7. Cerrar conexion
         finally:
@@ -141,8 +151,7 @@ class client :
             sock_client.sendall(mensaje)
 
         #  4. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si error)
-            resultado = sock_client.recv(1)
-            resultado = resultado.decode("utf-8")
+            resultado = client.leerValores(sock_client)
 
         #  5. Cerrar conexion
         finally:
@@ -188,17 +197,14 @@ class client :
             sock_client.sendall(mensaje)
         
         #  5. Se envía una cadena con el número de puerto de escucha
-            _, port = sock_client.getsockname()
-
             _, port = client._socket.getsockname()
             puerto = str(port) + "\0"
             mensaje = puerto.encode("utf-8")
             sock_client.sendall(mensaje)
 
         #  6. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si ya está conectado, 3 si error)
-            resultado = sock_client.recv(1)
-            resultado = resultado.decode("utf-8")
-        
+            resultado = client.leerValores(sock_client)
+
         #  7. Cerrar conexion
         finally:
             sock_client.close()
@@ -255,8 +261,7 @@ class client :
             sock_client.sendall(mensaje)
 
         #  4. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si no conectado, 3 si error)
-            resultado = sock_client.recv(1)
-            resultado = resultado.decode("utf-8")
+            resultado = client.leerValores(sock_client)
 
         #  5. Cerrar conexion
         finally:
@@ -291,7 +296,13 @@ class client :
     # * @return ERROR the user does not exist or another error occurred
     @staticmethod
     def  send(user, message, window):
+
+        msg = client._soap.service.eliminar_espacios(message)
         
+        if len(msg) > 255:
+            window['_SERVER_'].print("s> SEND FAIL")
+            return client.RC.ERROR
+
         print("SEND " + user + " " + message)
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -314,16 +325,14 @@ class client :
             sock_client.sendall(mensaje)
 
         #  5. Enviar cadena con el mensaje
-            mensaje = message + "\0"
+            mensaje = msg + "\0"
             mensaje = mensaje.encode("utf-8")
             sock_client.sendall(mensaje)
 
         #  6. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si error) y el id
-            resultado = sock_client.recv(1)
-            resultado = resultado.decode("utf-8")
+            resultado = client.leerValores(sock_client)
 
             id_emisor = client.leerValores(sock_client)
-            print("El tipo de id es: {}".format(type(id_emisor)))
 
         #  7. Cerrar conexion
         finally:
@@ -380,8 +389,7 @@ class client :
             sock_client.sendall(mensaje)
 
         #  4. Recibir respuesta del servidor (0 si bien, 1 si usuario no conectado, 2 si error)
-            resultado = sock_client.recv(1)
-            resultado = resultado.decode("utf-8")
+            resultado = client.leerValores(sock_client)
         
         #  5. Recibir cadena con el número de usuarios conectados si resultado es 0
             if resultado == "0":
@@ -403,7 +411,7 @@ class client :
             sock_client.close()
         
         if resultado == "0":
-            window['_SERVER_'].print("s> CONNECTED USERS ({num_users} users connected) OK - {conectados}".format(num_users=usuarios, conectados=conectados))
+            window['_SERVER_'].print("s> CONNECTED USERS ({num_users} users connected) OK - {conectados}".format(num_users=num_usuarios, conectados=conectados))
             return client.RC.OK
         elif resultado == "1":
             window['_SERVER_'].print("s> CONNECTED USERS FAIL / USER IS NOT CONNECTED")

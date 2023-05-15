@@ -28,7 +28,7 @@ typedef struct info{
 // Estructura para almacenar datos del usuario
 typedef struct user{
     char usuario[64];
-    char alias[64];
+    char alias[32];
     char fecha[11];
     int estado;
     char IP[INET_ADDRSTRLEN];

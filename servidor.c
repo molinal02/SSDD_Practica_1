@@ -69,7 +69,7 @@ void tratar_pet (void* pet){
         respuesta.status = connect_serv(peticion.content.alias, peticion.content.IP, peticion.content.port_escucha);
 
         // Se envia la respuesta al cliente
-        if (sendMessage(peticion.sock_client, respuesta.status, strlen(respuesta.status)) == -1)
+        if (sendMessage(peticion.sock_client, respuesta.status, strlen(respuesta.status)+1) == -1)
             perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente\n");
 
         if (strcmp(respuesta.status, "0") == 0){
@@ -88,51 +88,131 @@ void tratar_pet (void* pet){
             Message mensaje;
             while (fread(&mensaje, sizeof(Message), 1, user_fp)) {
 
-                // Información del servidor y cliente
-                int sock_client_fd;
-                struct sockaddr_in serv_addr;
-                unsigned short puerto = (unsigned short) atoi(peticion.content.port_escucha);
+                User emisor;
 
-                // Inicializamos a 0
-                bzero((char *)&serv_addr, sizeof(serv_addr));
+                // Se crea la ruta al fichero de registro del emisor
+                char ruta_emisor[2048];
+                sprintf(ruta_emisor, "users/register_%s/data_%s.dat",mensaje.alias_emisor, mensaje.alias_emisor);
+                
+                // Creamos el fichero de registro del emisor
+                FILE* emisor_fp;
 
-                // Dirección y puerto del socket de escucha del cliente
-                serv_addr.sin_family = AF_INET;
-                serv_addr.sin_addr.s_addr = inet_addr(peticion.content.IP);
-                serv_addr.sin_port = htons(puerto);
-                // Creación socket para comunicaciones con el cliente
-                if ((sock_client_fd = socket(AF_INET, SOCK_STREAM, 0))==-1) {
-                    perror("[SERVIDOR][ERROR] No se pudo crear socket de comunicaciones con el cliente\n");
+                if ((emisor_fp = fopen(ruta_emisor, "r+")) == NULL){
+                    perror("[SERVIDOR][ERROR] El fichero de mensajes del emisor no pudo ser abierto\n");
+                    strcpy(respuesta.content.status, "2");
                 }
 
-                // Conectamos con el socket de escucha del cliente
-                if (connect(sock_client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
-                    perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del cliente\n");
-                    if(close(sock_client_fd) == -1) {
-                        perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones con el cliente\n");
+                if (fread(&emisor, sizeof(User), 1, emisor_fp) == 0){
+                    perror("[SERVIDOR][ERROR] No se pudo leer el fichero del emisor\n");
+                    fclose(emisor_fp);
+                    strcpy(respuesta.content.status, "2");
+                }
+
+                if (emisor.estado == 1) {
+
+                    // Información del servidor y cliente
+                    int sock_client_fd;
+                    struct sockaddr_in serv_addr;
+                    unsigned short puerto = (unsigned short) atoi(peticion.content.port_escucha);
+
+                    // Inicializamos a 0
+                    bzero((char *)&serv_addr, sizeof(serv_addr));
+
+                    // Dirección y puerto del socket de escucha del cliente
+                    serv_addr.sin_family = AF_INET;
+                    serv_addr.sin_addr.s_addr = inet_addr(peticion.content.IP);
+                    serv_addr.sin_port = htons(puerto);
+                    // Creación socket para comunicaciones con el cliente
+                    if ((sock_client_fd = socket(AF_INET, SOCK_STREAM, 0))==-1) {
+                        perror("[SERVIDOR][ERROR] No se pudo crear socket de comunicaciones con el cliente\n");
+                        strcpy(respuesta.content.status, "2");
+                    }
+
+                    // Conectamos con el socket de escucha del cliente
+                    if (connect(sock_client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
+                        perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del cliente\n");
+                        if(close(sock_client_fd) == -1) {
+                            perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones con el cliente\n");
+                            strcpy(respuesta.content.status, "2");
+                        }
+                    } else {
+                        
+                        char operacion[14];
+                        strcpy(operacion, "RECEIVE_MESS");
+
+                        // Enviamos la operacion
+                        if (sendMessage(sock_client_fd, operacion, strlen(operacion)+1) == -1){
+                            perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (operacion)\n");
+                            strcpy(respuesta.content.status, "2");
+                        }
+                        if (sendMessage(sock_client_fd, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1){
+                            perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
+                            strcpy(respuesta.content.status, "2");
+                        }
+
+                        if (sendMessage(sock_client_fd, mensaje.alias_emisor, strlen(mensaje.alias_emisor)+1) == -1) {
+                            perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (emisor)\n");
+                            strcpy(respuesta.content.status, "2");
+                        }
+
+                        if (sendMessage(sock_client_fd, mensaje.mensaje, strlen(mensaje.mensaje)+1) == -1){
+                            perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (mensaje)\n");
+                            strcpy(respuesta.content.status, "2");
+                        }
+
+                        if (strcmp(respuesta.content.status, "0") == 0){
+
+                            // Información del servidor y emisor
+                            int sock_emisor_fd;
+                            struct sockaddr_in serv_addr;
+                            unsigned short puerto = (unsigned short) atoi(emisor.port_escucha);
+
+                            // Inicializamos a 0
+                            bzero((char *)&serv_addr, sizeof(serv_addr));
+
+                            // Dirección y puerto del socket de escucha del emisor
+                            serv_addr.sin_family = AF_INET;
+                            serv_addr.sin_addr.s_addr = inet_addr(emisor.IP);
+                            serv_addr.sin_port = htons(puerto);
+                            // Creación socket para comunicaciones con el emisor
+                            if ((sock_emisor_fd = socket(AF_INET, SOCK_STREAM, 0))==-1) {
+                                perror("[SERVIDOR][ERROR] No se pudo crear socket de comunicaciones con el emisor\n");
+                            }
+
+                            // Conectamos con el socket de escucha del emisor
+                            if (connect(sock_emisor_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
+                                perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del emisor\n");
+                                if(close(sock_emisor_fd) == -1) {
+                                    perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones con el emisor\n");
+                                    strcpy(respuesta.content.status, "2");
+                                }
+                            } else {
+                                strcpy(operacion, "SEND_MESS_ACK");
+                                // Enviamos la operacion
+                                if (sendMessage(sock_emisor_fd, operacion, strlen(operacion)+1) == -1){
+                                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (operacion)\n");
+                                    strcpy(respuesta.content.status, "2");
+                                }
+                                // Enviamos el id del mensaje
+                                if (sendMessage(sock_emisor_fd, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1){
+                                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
+                                    strcpy(respuesta.content.status, "2");
+                                }
+                                // Cerramos el socket
+                                if(close(sock_emisor_fd) == -1) {
+                                    perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
+                                    strcpy(respuesta.content.status, "2");
+                                }
+                            }
+                        }
+                        // Cerramos el socket
+                        if(close(sock_client_fd) == -1) {
+                            perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
+                            strcpy(respuesta.content.status, "2");
+                        } 
                     }
                 }
-
-                if (sendMessage(sock_client_fd, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1){
-                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
-                    strcpy(respuesta.content.status, "2");
-                }
-
-                if (sendMessage(sock_client_fd, mensaje.alias_emisor, strlen(mensaje.alias_emisor)+1) == -1) {
-                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (emisor)\n");
-                    strcpy(respuesta.content.status, "2");
-                }
-
-                if (sendMessage(sock_client_fd, mensaje.mensaje, strlen(mensaje.mensaje)+1) == -1){
-                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (mensaje)\n");
-                    strcpy(respuesta.content.status, "2");
-                }
-
-                // Cerramos el socket
-                if(close(sock_client_fd) == -1) {
-                    perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
-                    strcpy(respuesta.content.status, "2");
-                }
+                fclose(emisor_fp);
             }
 
             // Cerramos el archivo
@@ -172,6 +252,16 @@ void tratar_pet (void* pet){
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
 
         } else if (strcmp(respuesta.content.status, "0") == 0){
+        
+            char id_emisor2[32];
+            sprintf(id_emisor2, "%u", respuesta.content.id);
+
+            if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
+
+            if (sendMessage(peticion.sock_client, id_emisor2, strlen(id_emisor2)+1) == -1)
+                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
+
             // Información del servidor y cliente
             int sock_client_fd;
             struct sockaddr_in serv_addr;
@@ -196,42 +286,104 @@ void tratar_pet (void* pet){
                 if(close(sock_client_fd) == -1) {
                     perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones con el cliente\n");
                 }
+            } else {
+                Message mensaje;
+                sprintf(mensaje.id_emisor, "%u", respuesta.content.id);
+                sprintf(mensaje.alias_emisor, "%s", peticion.content.alias);
+                sprintf(mensaje.mensaje, "%s", peticion.content.mensaje);
+
+                // Enviamos el mensaje al destinatario
+                char operacion[14];
+                strcpy(operacion, "RECEIVE_MESS");
+
+                if (sendMessage(sock_client_fd, operacion, strlen(operacion)+1) == -1){
+                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (operacion)\n");
+                    strcpy(respuesta.content.status, "2");
+                }
+                if (sendMessage(sock_client_fd, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1){
+                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
+                    strcpy(respuesta.content.status, "2");
+                }
+                if (sendMessage(sock_client_fd, mensaje.alias_emisor, strlen(mensaje.alias_emisor)+1) == -1) {
+                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (emisor)\n");
+                    strcpy(respuesta.content.status, "2");
+                }
+                if (sendMessage(sock_client_fd, mensaje.mensaje, strlen(mensaje.mensaje)+1) == -1){
+                    perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (mensaje)\n");
+                    strcpy(respuesta.content.status, "2");
+                }
+                
+                // Cerramos el socket
+                if(close(sock_client_fd) == -1) {
+                    perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
+                    strcpy(respuesta.content.status, "2");
+                }
+
+                if (strcmp(respuesta.content.status, "0") == 0){
+                        User emisor;
+
+                        // Se crea la ruta al fichero de registro del emisor
+                        char ruta_emisor[2048];
+                        sprintf(ruta_emisor, "users/register_%s/data_%s.dat",mensaje.alias_emisor, mensaje.alias_emisor);
+                        
+                        // Creamos el fichero de registro del emisor
+                        FILE* emisor_fp;
+
+                        if ((emisor_fp = fopen(ruta_emisor, "r+")) == NULL){
+                            perror("[SERVIDOR][ERROR] El fichero de mensajes del emisor no pudo ser abierto\n");
+                            strcpy(respuesta.content.status, "2");
+                        }
+
+                        if (fread(&emisor, sizeof(User), 1, emisor_fp) == 0){
+                            perror("[SERVIDOR][ERROR] No se pudo leer el fichero del emisor\n");
+                            fclose(emisor_fp);
+                            strcpy(respuesta.content.status, "2");
+                        }
+
+                        // Información del servidor y emisor
+                        int sock_emisor_fd;
+                        struct sockaddr_in serv_addr;
+                        unsigned short puerto = (unsigned short) atoi(emisor.port_escucha);
+
+                        // Inicializamos a 0
+                        bzero((char *)&serv_addr, sizeof(serv_addr));
+
+                        // Dirección y puerto del socket de escucha del emisor
+                        serv_addr.sin_family = AF_INET;
+                        serv_addr.sin_addr.s_addr = inet_addr(emisor.IP);
+                        serv_addr.sin_port = htons(puerto);
+                        // Creación socket para comunicaciones con el emisor
+                        if ((sock_emisor_fd = socket(AF_INET, SOCK_STREAM, 0))==-1) {
+                            perror("[SERVIDOR][ERROR] No se pudo crear socket de comunicaciones con el emisor\n");
+                        }
+
+                        // Conectamos con el socket de escucha del emisor
+                        if (connect(sock_emisor_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
+                            perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del emisor\n");
+                            if(close(sock_emisor_fd) == -1) {
+                                perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones con el emisor\n");
+                            }
+                        } else {
+                            strcpy(operacion, "SEND_MESS_ACK");
+                            // Enviamos la operacion
+                            if (sendMessage(sock_emisor_fd, operacion, strlen(operacion)+1) == -1){
+                                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (operacion)\n");
+                                strcpy(respuesta.content.status, "2");
+                            }
+                            // Enviamos el id del mensaje
+                            if (sendMessage(sock_emisor_fd, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1){
+                                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
+                                strcpy(respuesta.content.status, "2");
+                            }
+                        }
+                        // Cerramos el socket
+                        if(close(sock_emisor_fd) == -1) {
+                            perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
+                            strcpy(respuesta.content.status, "2");
+                        }
+                }
+                printf("s> MESSAGE %s FROM %s TO %s\n", mensaje.id_emisor, mensaje.alias_emisor, peticion.content.destinatario);
             }
-
-            char id_emisor2[32];
-            sprintf(id_emisor2, "%u", respuesta.content.id);
-            Message mensaje;
-            sprintf(mensaje.id_emisor, "%u", respuesta.content.id);
-            sprintf(mensaje.alias_emisor, "%s", peticion.content.alias);
-            sprintf(mensaje.mensaje, "%s", peticion.content.mensaje);
-
-            // Enviamos el mensaje al destinatario
-            if (sendMessage(sock_client_fd, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1){
-                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
-                strcpy(respuesta.content.status, "2");
-            }
-            if (sendMessage(sock_client_fd, mensaje.alias_emisor, strlen(mensaje.alias_emisor)+1) == -1) {
-                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (emisor)\n");
-                strcpy(respuesta.content.status, "2");
-            }
-            if (sendMessage(sock_client_fd, mensaje.mensaje, strlen(mensaje.mensaje)+1) == -1){
-                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (mensaje)\n");
-                strcpy(respuesta.content.status, "2");
-            }
-
-            // Cerramos el socket
-            if(close(sock_client_fd) == -1) {
-                perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
-                strcpy(respuesta.content.status, "2");
-            }
-
-            if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
-                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
-
-            if (sendMessage(peticion.sock_client, id_emisor2, strlen(id_emisor2)+1) == -1)
-                perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
-
-            printf("s> MESSAGE <%s> FROM <%s> TO <%s>\n", mensaje.id_emisor, mensaje.alias_emisor, peticion.content.destinatario);
 
         } else if ((strcmp(respuesta.content.status, "3")) == 0){
             
@@ -261,7 +413,7 @@ void tratar_pet (void* pet){
             if (sendMessage(peticion.sock_client, mensaje.id_emisor, strlen(mensaje.id_emisor)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
 
-            printf("s> MESSAGE <%s> FROM <%s> TO <%s> STORED\n", mensaje.id_emisor, mensaje.alias_emisor, peticion.content.destinatario);
+            printf("s> MESSAGE %s FROM %s TO %s STORED\n", mensaje.id_emisor, mensaje.alias_emisor, peticion.content.destinatario);
 
         }
         pthread_mutex_unlock(&users_mutex);
@@ -311,12 +463,6 @@ void tratar_pet (void* pet){
 
 
 int main(int argc, char* argv[]){
-
-    /*-----------  REVISAR ESTO -------------
-    
-    Mirar como hacer para que el servidor muestre en la interfaz que se ha conectado (no estoy seguro de que sea asi)
-
-      -----------  REVISAR ESTO -------------*/
 
     // Estructura para agrupar la información
     Request peticion;
@@ -531,4 +677,4 @@ int main(int argc, char* argv[]){
             return -1;
         }
         return 0;
-    }
+}

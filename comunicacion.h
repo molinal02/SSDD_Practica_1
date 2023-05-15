@@ -10,13 +10,27 @@
 // Estructura para información mandada
 typedef struct info{
     char usuario[64];
-    char destinatario[64];
+    char destinatario[32];
     char alias[32];
     char fecha[11];
+	int estado;
 	char IP[INET_ADDRSTRLEN];
     char port_escucha[6];
     char mensaje[256];
+	unsigned int id_msg;
 } Info;
+
+// Estructura para información de usuario
+typedef struct user{
+    char usuario[64];
+    char alias[32];
+    char fecha[11];
+    int estado;
+    char IP[INET_ADDRSTRLEN];
+    char port_escucha[6];
+    char pend_mensajes[256];
+    unsigned int id_msg;
+} User;
 
 // Estructura para información recibida
 typedef struct response{
@@ -65,13 +79,14 @@ int recvMessage(int socket, char *buffer, int len){
 // Recepcion de mensajes por socket [TOMADO DE EJEMPLO DE CLASE]
 int sendMessage(int socket, char * buffer, int len){
 	int r, l = len;
-	do {	
+	do {
 		r = write(socket, buffer, l);
 		l -= r;
 		buffer += r;
 	} while ((l>0) && (r>=0));
-	if (r < 0)
-		return (-1);   /* fail */
+	if (r < 0){
+		return (-1);
+	}   /* fail */
 	return(0);	/* full length has been sent */
 }
 
