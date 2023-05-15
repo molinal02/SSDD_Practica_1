@@ -3,6 +3,7 @@ import sys
 import PySimpleGUI as sg
 from enum import Enum
 import argparse
+import time
 
 import socket
 import threading
@@ -44,7 +45,6 @@ class client :
 
     @staticmethod
     def hiloEscucha(window):
-        
         # Creamos el socket para escuchar al servidor usando la ip del ordenador
         client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = (client._server, 0)
@@ -197,6 +197,9 @@ class client :
             sock_client.sendall(mensaje)
         
         #  5. Se envía una cadena con el número de puerto de escucha
+            while client._socket == None:
+                time.sleep(0.1)
+
             _, port = client._socket.getsockname()
             puerto = str(port) + "\0"
             mensaje = puerto.encode("utf-8")
