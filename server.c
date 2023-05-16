@@ -26,9 +26,10 @@ char* disconnect_serv(char *alias);
 Response send_serv(char *alias, char *destino, char *mensaje);
 Response connected_users_serv(char *alias);
 
-
+// Función para tratar las peticiones de los clientes
 void tratar_pet (void* pet){
 
+    // Estructuras de datos de entrada y salida
     Request peticion;
     Service respuesta;
 
@@ -45,9 +46,8 @@ void tratar_pet (void* pet){
         pthread_mutex_lock(&users_mutex);
         respuesta.status = register_serv(peticion.content.usuario, peticion.content.alias, peticion.content.fecha);
         pthread_mutex_unlock(&users_mutex);
-        //respuesta.status = ntohl(respuesta.status);
 
-        // Se envia la respuesta al cliente
+        // Se envia la respuesta al cliente con el status
         if (sendMessage(peticion.sock_client, respuesta.status, strlen(respuesta.status)+1) == -1)
             perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente\n");
             
@@ -58,7 +58,7 @@ void tratar_pet (void* pet){
         respuesta.status = unregister_serv(peticion.content.alias);
         pthread_mutex_unlock(&users_mutex);
 
-        // Se envia la respuesta al cliente
+        // Se envia la respuesta al cliente con el status
         if (sendMessage(peticion.sock_client, respuesta.status, strlen(respuesta.status)+1) == -1)
             perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente\n");
 
@@ -68,17 +68,18 @@ void tratar_pet (void* pet){
         pthread_mutex_lock(&users_mutex);
         respuesta.status = connect_serv(peticion.content.alias, peticion.content.IP, peticion.content.port_escucha);
 
-        // Se envia la respuesta al cliente
+        // Se envia la respuesta al cliente con el status
         if (sendMessage(peticion.sock_client, respuesta.status, strlen(respuesta.status)+1) == -1)
             perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente\n");
 
+        // Si todo ha salido bien se procede a enviar los posibles mensajes que tenga pendientes
         if (strcmp(respuesta.status, "0") == 0){
 
             // Se crea la ruta al fichero de mensajes del usuario
             char ruta_fichero[2048];
             sprintf(ruta_fichero, "users/register_%s/msg_%s.dat",peticion.content.alias, peticion.content.alias);
             
-            // Creamos el fichero de registro
+            // Creamos el fichero de mensajes
             FILE* user_fp;
 
             if ((user_fp = fopen(ruta_fichero, "r+")) == NULL){
@@ -86,6 +87,7 @@ void tratar_pet (void* pet){
             }
 
             Message mensaje;
+            // Se lee cada mensaje del fichero y se manda uno por uno
             while (fread(&mensaje, sizeof(Message), 1, user_fp)) {
 
                 User emisor;
@@ -108,6 +110,7 @@ void tratar_pet (void* pet){
                     strcpy(respuesta.content.status, "2");
                 }
 
+                // Hace falta comprobar que el emisor este conectado para poder enviarle el ACK
                 if (emisor.estado == 1) {
 
                     // Información del servidor y cliente
@@ -128,7 +131,7 @@ void tratar_pet (void* pet){
                         strcpy(respuesta.content.status, "2");
                     }
 
-                    // Conectamos con el socket de escucha del cliente
+                    // Conectamos con el socket de escucha del cliente, se continúa solo si es exitoso
                     if (connect(sock_client_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
                         perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del cliente\n");
                         if(close(sock_client_fd) == -1) {
@@ -140,7 +143,7 @@ void tratar_pet (void* pet){
                         char operacion[14];
                         strcpy(operacion, "RECEIVE_MESS");
 
-                        // Enviamos la operacion
+                        // Enviamos la operación y depués los 3 campos del mensaje al receptor
                         if (sendMessage(sock_client_fd, operacion, strlen(operacion)+1) == -1){
                             perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (operacion)\n");
                             strcpy(respuesta.content.status, "2");
@@ -160,6 +163,9 @@ void tratar_pet (void* pet){
                             strcpy(respuesta.content.status, "2");
                         }
 
+                        printf("s> MESSAGE %s FROM %s TO %s\n", mensaje.id_emisor, mensaje.alias_emisor, peticion.content.alias);
+
+                        // Si el status sigue siendo 0, todo ha salido bien y se envía el ACK
                         if (strcmp(respuesta.content.status, "0") == 0){
 
                             // Información del servidor y emisor
@@ -179,7 +185,7 @@ void tratar_pet (void* pet){
                                 perror("[SERVIDOR][ERROR] No se pudo crear socket de comunicaciones con el emisor\n");
                             }
 
-                            // Conectamos con el socket de escucha del emisor
+                            // Conectamos con el socket de escucha del emisor se continúa solo si ha salido bien
                             if (connect(sock_emisor_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
                                 perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del emisor\n");
                                 if(close(sock_emisor_fd) == -1) {
@@ -187,6 +193,7 @@ void tratar_pet (void* pet){
                                     strcpy(respuesta.content.status, "2");
                                 }
                             } else {
+
                                 strcpy(operacion, "SEND_MESS_ACK");
                                 // Enviamos la operacion
                                 if (sendMessage(sock_emisor_fd, operacion, strlen(operacion)+1) == -1){
@@ -198,27 +205,29 @@ void tratar_pet (void* pet){
                                     perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
                                     strcpy(respuesta.content.status, "2");
                                 }
-                                // Cerramos el socket
+                                // Cerramos el socket emisor
                                 if(close(sock_emisor_fd) == -1) {
                                     perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
                                     strcpy(respuesta.content.status, "2");
                                 }
+                                 
                             }
                         }
-                        // Cerramos el socket
+                        // Cerramos el socket receptor
                         if(close(sock_client_fd) == -1) {
                             perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
                             strcpy(respuesta.content.status, "2");
-                        } 
+                        }
                     }
                 }
+                // Cerramos el archivo de registro del emisor
                 fclose(emisor_fp);
             }
 
-            // Cerramos el archivo
+            // Cerramos el archivo de mensajes del receptor
             fclose(user_fp);
 
-            // Abrimos el archivo para borrar su contenido
+            // Abrimos el archivo de mensajes de nuevo y cerramos para borrar su contenido
             FILE* user_fp2;
             if ((user_fp2 = fopen(ruta_fichero, "wb")) == NULL){
                 perror("[SERVIDOR][ERROR] El fichero de mensajes del usuario no pudo ser abierto tras la lectura de mensajes\n");
@@ -236,7 +245,7 @@ void tratar_pet (void* pet){
             respuesta.status = disconnect_serv(peticion.content.alias);
             pthread_mutex_unlock(&users_mutex);
 
-            // Se envia la respuesta al cliente
+            // Se envia la respuesta al cliente con el status
             if (sendMessage(peticion.sock_client, respuesta.status, strlen(respuesta.status)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente\n");
                 
@@ -246,22 +255,26 @@ void tratar_pet (void* pet){
         pthread_mutex_lock(&users_mutex);
         respuesta.content = send_serv(peticion.content.alias, peticion.content.destinatario, peticion.content.mensaje); 
 
+        // Si se recibe 1 o 2, ha surgido algún error
         if ((strcmp(respuesta.content.status, "1") == 0) || (strcmp(respuesta.content.status, "2") == 0)){
             // Se envia la respuesta de status al cliente
             if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
 
+        // Si se recibe 0, todo ha salido bien y ambos usuarios están conectados por lo que se envía directamente
         } else if (strcmp(respuesta.content.status, "0") == 0){
         
             char id_emisor2[32];
             sprintf(id_emisor2, "%u", respuesta.content.id);
 
+            // Primero se envían el status y el id
             if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
 
             if (sendMessage(peticion.sock_client, id_emisor2, strlen(id_emisor2)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
 
+            // Creamos el el socket para conectarnos al hilo de escucha del receptor
             // Información del servidor y cliente
             int sock_client_fd;
             struct sockaddr_in serv_addr;
@@ -287,12 +300,13 @@ void tratar_pet (void* pet){
                     perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones con el cliente\n");
                 }
             } else {
+
                 Message mensaje;
                 sprintf(mensaje.id_emisor, "%u", respuesta.content.id);
                 sprintf(mensaje.alias_emisor, "%s", peticion.content.alias);
                 sprintf(mensaje.mensaje, "%s", peticion.content.mensaje);
 
-                // Enviamos el mensaje al destinatario
+                // Enviamos el mensaje al destinatario tras la operación
                 char operacion[14];
                 strcpy(operacion, "RECEIVE_MESS");
 
@@ -319,6 +333,7 @@ void tratar_pet (void* pet){
                     strcpy(respuesta.content.status, "2");
                 }
 
+                // Si todo ha salido bien se envía el ACK al emisor
                 if (strcmp(respuesta.content.status, "0") == 0){
                         User emisor;
 
@@ -333,7 +348,8 @@ void tratar_pet (void* pet){
                             perror("[SERVIDOR][ERROR] El fichero de mensajes del emisor no pudo ser abierto\n");
                             strcpy(respuesta.content.status, "2");
                         }
-
+                        
+                        // Lo leemos
                         if (fread(&emisor, sizeof(User), 1, emisor_fp) == 0){
                             perror("[SERVIDOR][ERROR] No se pudo leer el fichero del emisor\n");
                             fclose(emisor_fp);
@@ -357,7 +373,7 @@ void tratar_pet (void* pet){
                             perror("[SERVIDOR][ERROR] No se pudo crear socket de comunicaciones con el emisor\n");
                         }
 
-                        // Conectamos con el socket de escucha del emisor
+                        // Conectamos con el socket de escucha del emisor, se continúa solo si ha salido correctamente
                         if (connect(sock_emisor_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == -1) {
                             perror("[SERVIDOR][ERROR] No se pudo conectar con el socket de escucha del emisor\n");
                             if(close(sock_emisor_fd) == -1) {
@@ -375,16 +391,17 @@ void tratar_pet (void* pet){
                                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (id del mensaje)\n");
                                 strcpy(respuesta.content.status, "2");
                             }
-                        }
-                        // Cerramos el socket
-                        if(close(sock_emisor_fd) == -1) {
-                            perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
-                            strcpy(respuesta.content.status, "2");
-                        }
+                            // Cerramos el socket
+                            if(close(sock_emisor_fd) == -1) {
+                                perror("[SERVIDOR][ERROR] No se pudo cerrar el socket de comunicaciones\n");
+                                strcpy(respuesta.content.status, "2");
+                            }
+                        }  
                 }
                 printf("s> MESSAGE %s FROM %s TO %s\n", mensaje.id_emisor, mensaje.alias_emisor, peticion.content.destinatario);
             }
 
+        // Si el status es 3, todo ha salido correctamente pero el receptor no esta conectado por lo que se guarda en su fichero
         } else if ((strcmp(respuesta.content.status, "3")) == 0){
             
             Message mensaje;
@@ -398,6 +415,7 @@ void tratar_pet (void* pet){
                 perror("[SERVIDOR][ERROR] No se pudo abrir el fichero de mensajes del destinatario\n");
                 respuesta.content.status = "2";
             }
+            // Escribimos el mensaje en el fichero
             if (fwrite(&mensaje, sizeof(Message), 1, fichero_mensajes) == 0) {
                 perror("[SERVIDOR][ERROR] No se pudo escribir el mensaje en el fichero de mensajes del destinatario\n");
                 respuesta.content.status = "2";
@@ -405,8 +423,10 @@ void tratar_pet (void* pet){
 
             fclose(fichero_mensajes);
 
+            // Para seguir el protocolo se debe cambiar el 3 por un 0 (ya que es una operación exitosa)
             respuesta.content.status = "0";
 
+            // Enviamos el status al emisor
             if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
 
@@ -428,22 +448,20 @@ void tratar_pet (void* pet){
         if (sendMessage(peticion.sock_client, respuesta.content.status, strlen(respuesta.content.status)+1) == -1)
             perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (status)\n");
         
+        // Si el status es 0, todo ha salido correctamente y se envía la lista de conectados uno a uno
         if (strcmp(respuesta.content.status, "0") == 0) {
             // Pasamos a string el número de usuarios conectados
             char num_users[32];
             sprintf(num_users, "%d", respuesta.content.num_users);
 
-            printf("Número de usuarios conectados: %d\n", respuesta.content.num_users);
-            printf("Usuarios conectados: %s\n", respuesta.content.users);
             // Se envia el número de usuarios conectados
             if (sendMessage(peticion.sock_client, num_users, strlen(num_users)+1) == -1)
                 perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (número de usuarios)\n");
 
-            // Guardamos los usuarios conectados en un string
+            // Se separan los usuarios conectados por comas
             char *persona = strtok(respuesta.content.users, ",");
             while (persona != NULL) {
                 // Se envían los usuarios conectados
-                printf("Usuario mandado: %s\n", persona);
                 if (sendMessage(peticion.sock_client, persona, strlen(persona)+1) == -1)
                     perror("[SERVIDOR][ERROR] No se pudo enviar la respuesta al cliente (usuarios)\n");
                 persona = strtok(NULL, ",");
@@ -486,22 +504,28 @@ int main(int argc, char* argv[]){
     char mensaje[256];
 
     // Se comprueba que se ha introducido el puerto como argumento
-    if (argc != 2){
+    if (argc != 3){
         printf("[SERVIDOR][ERROR] Debe introducir el puerto como argumento\n");
         return -1;
     }
 
+    if (strcmp(argv[1], "-p") != 0){
+        printf("[SERVIDOR][ERROR] La forma de ejecución es <./servidor_pf -p PUERTO>\n");
+        return -1;
+    }
+
     // Se almacena el puerto introducido como argumento y se comprueba que es valido
-    short puerto = (short) atoi(argv[1]);
+    short puerto = (short) atoi(argv[2]);
 
     if (puerto < 1024 || puerto > 65535){
         printf("[SERVIDOR][ERROR] El puerto introducido no es valido\n");
         return -1;
     }
 
+    // Se obtiene la IP de la interfaz de red eth0
     struct ifaddrs *ifaddr, *ifa;
     int family, s;
-    char *desiredInterface = "eth0";  // Nombre de la interfaz de red deseada
+    char *desiredInterface = "eth0";
     char host[NI_MAXHOST];
 
     if (getifaddrs(&ifaddr) == -1) {
@@ -529,7 +553,7 @@ int main(int argc, char* argv[]){
         }
     }
 
-    // Se muestra mensaje de inicio
+    // Se muestra mensaje de inicio con la IP y el puerto del servidor
     printf("init server %s:%d\n", host, puerto);
     printf("s>\n");
 
@@ -567,6 +591,7 @@ int main(int argc, char* argv[]){
     pthread_attr_init(&th_attr);
     pthread_attr_setdetachstate(&th_attr,PTHREAD_CREATE_DETACHED);
 
+    // Bucle para aceptar conexiones de clientes
     while(1){
 
         // Se acepta la conexion del cliente

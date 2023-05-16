@@ -30,10 +30,14 @@ class client :
     _date = None
     _hilo = None
     _socket = None
-    _soap = zeep.Client(wsdl="http://localhost:8000/?wsdl")
-
+    # Se comprueba si el servidor web está conectado o no
+    try:
+        _soap = zeep.Client(wsdl="http://localhost:8000/?wsdl")
+    except:
+        print("Error al conectar con el servidor web, los mensajes no se formatearán")
     # ******************** METHODS *******************
     @staticmethod
+    # Función para recibir mensajes del servidor (sacada de aula global)
     def leerValores(socket):
         mensaje = ""
         while True:
@@ -44,6 +48,7 @@ class client :
         return mensaje
 
     @staticmethod
+    # Función para recibir los mensajes y acks del servidor 
     def hiloEscucha(window):
         # Creamos el socket para escuchar al servidor usando la ip del ordenador
         client._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -55,10 +60,10 @@ class client :
         while True:
             # Esperamos a que se conecte un cliente
             socket_cliente, direccion = client._socket.accept()
-            print("Conectado")
             try:
                 #Recibimos un mensaje con la operacion
                 operacion = client.leerValores(socket_cliente)
+
                 if operacion == "RECEIVE_MESS":
                     id = client.leerValores(socket_cliente)
                     remitente = client.leerValores(socket_cliente)
@@ -88,7 +93,11 @@ class client :
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = (client._server, client._port)
-        sock_client.connect(server_address)
+        try:
+            sock_client.connect(server_address)
+        except:
+            window['_SERVER_'].print("s> COULDN'T CONNECT TO SERVER (MIGHT BE OFFLINE)")
+            return client.RC.ERROR
 
         #  2. Enviar la cadena REGISTER
         try:
@@ -117,6 +126,7 @@ class client :
         finally:
             sock_client.close()
 
+        #  8. Evaluar resultado
         if resultado == "0":
             window['_SERVER_'].print("s> REGISTER OK")
             return client.RC.OK
@@ -138,7 +148,11 @@ class client :
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = (client._server, client._port)
-        sock_client.connect(server_address)
+        try:
+            sock_client.connect(server_address)
+        except:
+            window['_SERVER_'].print("s> COULDN'T CONNECT TO SERVER (MIGHT BE OFFLINE)")
+            return client.RC.ERROR
 
         #  2. Enviar la cadena UNREGISTER
         try:
@@ -157,8 +171,12 @@ class client :
         finally:
             sock_client.close()
 
+        #  6. Evaluar resultado
         if resultado == "0":
             window['_SERVER_'].print("s> UNREGISTER OK")
+            client._username = None
+            client._alias = None
+            client._date = None
             return client.RC.OK
         elif resultado == "1":
             window['_SERVER_'].print("s> USER DOES NOT EXIST")
@@ -180,7 +198,11 @@ class client :
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = (client._server, client._port)
-        sock_client.connect(server_address)
+        try:
+            sock_client.connect(server_address)
+        except:
+            window['_SERVER_'].print("s> COULDN'T CONNECT TO SERVER (MIGHT BE OFFLINE)")
+            return client.RC.ERROR
 
         #  2. Creamos hilo de escucha
         client._hilo = threading.Thread(target=client.hiloEscucha, args=(window,))
@@ -197,6 +219,7 @@ class client :
             sock_client.sendall(mensaje)
         
         #  5. Se envía una cadena con el número de puerto de escucha
+            # Nos aseguramos de que se ejecute lo siguiente solo si el hilo ya ha podido crear su socket
             while client._socket == None:
                 time.sleep(0.1)
 
@@ -212,6 +235,7 @@ class client :
         finally:
             sock_client.close()
 
+        #  8. Evaluar resultado
         if resultado == "0":
             window['_SERVER_'].print("s> CONNECT OK")
             return client.RC.OK
@@ -251,7 +275,11 @@ class client :
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = (client._server, client._port)
-        sock_client.connect(server_address)
+        try:
+            sock_client.connect(server_address)
+        except:
+            window['_SERVER_'].print("s> COULDN'T CONNECT TO SERVER (MIGHT BE OFFLINE)")
+            return client.RC.ERROR
 
         #  2. Enviar la cadena DISCONNECT
         try:
@@ -270,6 +298,7 @@ class client :
         finally:
             sock_client.close()
 
+        #  6. Evaluar resultado
         if resultado == "0":
             try:
                 if (client._socket != None):
@@ -299,18 +328,28 @@ class client :
     # * @return ERROR the user does not exist or another error occurred
     @staticmethod
     def  send(user, message, window):
-
-        msg = client._soap.service.eliminar_espacios(message)
+    
+        #  0. Se comprueba que el servidor web sigue activo y si es así se formatea el mensaje
+        try:
+            client._soap = zeep.Client(wsdl="http://localhost:8000/?wsdl")
+            msg = client._soap.service.eliminar_espacios(message)
+        except:
+            msg = message
         
         if len(msg) > 255:
             window['_SERVER_'].print("s> SEND FAIL")
             return client.RC.ERROR
 
-        print("SEND " + user + " " + message)
+        print("SEND " + user + " " + msg)
+
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = (client._server, client._port)
-        sock_client.connect(server_address)
+        try:
+            sock_client.connect(server_address)
+        except:
+            window['_SERVER_'].print("s> COULDN'T CONNECT TO SERVER (MIGHT BE OFFLINE)")
+            return client.RC.ERROR
 
         #  2. Enviar la cadena SEND
         try:
@@ -334,25 +373,20 @@ class client :
 
         #  6. Recibir respuesta del servidor (0 si bien, 1 si no existe, 2 si error) y el id
             resultado = client.leerValores(sock_client)
-
-            id_emisor = client.leerValores(sock_client)
+            if resultado == "0":
+                id_emisor = client.leerValores(sock_client)
 
         #  7. Cerrar conexion
         finally:
             sock_client.close()
         
+        #  8. Evaluar resultado
         if resultado == "0":
             window['_SERVER_'].print("s> SEND OK - MESSAGE {id}".format(id=id_emisor))
             return client.RC.OK
         elif resultado == "1":
             window['_SERVER_'].print("s> SEND FAIL / USER DOES NOT EXIST")
             return client.RC.USER_ERROR
-        
-        # -----------  REVISAR ESTO -------------
-        
-        # VER COMO HACER QUE SE RECIBA EL IDENTIFICADOR CUANDO SE ENVÍA AL RECEPTOR Y NO JUSTO DESPUÉS DE ENVIAR
-
-        # -----------  REVISAR ESTO -------------
 
         window['_SERVER_'].print("s> SEND FAIL")
         return client.RC.ERROR
@@ -379,7 +413,11 @@ class client :
         #  1. Conectarse al servidor
         sock_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = (client._server, client._port)
-        sock_client.connect(server_address)
+        try:
+            sock_client.connect(server_address)
+        except:
+            window['_SERVER_'].print("s> COULDN'T CONNECT TO SERVER (MIGHT BE OFFLINE)")
+            return client.RC.ERROR
 
         #  2. Enviar la cadena CONNECTEDUSERS
         try:
@@ -400,7 +438,7 @@ class client :
                 print("Numero de usuarios: {}".format(num_usuarios))
                 num_usuarios = int(num_usuarios, 10)
         
-        #  6. Recibir cadenas como usuarios conectados
+        #  6. Recibir cadenas con usuarios conectados
                 conectados = ""
                 for i in range(num_usuarios):
                     usuario = client.leerValores(sock_client)
@@ -413,6 +451,7 @@ class client :
         finally:
             sock_client.close()
         
+        #  7. Evaluar resultado
         if resultado == "0":
             window['_SERVER_'].print("s> CONNECTED USERS ({num_users} users connected) OK - {conectados}".format(num_users=num_usuarios, conectados=conectados))
             return client.RC.OK
